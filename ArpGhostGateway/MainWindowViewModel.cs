@@ -215,11 +215,11 @@ namespace ArpGhostGateway
             {
                 if (address.Addr.type == Sockaddr.AddressTypes.AF_INET_AF_INET6)
                 {
-                    // make sure the address is ipv4
+                    //ipv4地址
                     if (address.Addr.ipAddress.AddressFamily == AddressFamily.InterNetwork)
                     {
                         LocalIp = address.Addr.ipAddress;
-                        break; // break out of the foreach
+                        break;
                     }
                 }
             }
@@ -305,14 +305,9 @@ namespace ArpGhostGateway
         public PhysicalAddress Resolve(IPAddress destIP)
         {
             var request = BuildRequest(destIP, LocalMac, LocalIp);
-            //create a "tcpdump" filter for allowing only arp replies to be read
             string arpFilter = "arp and ether dst " + LocalMac.ToString();
-            //open the device with 20ms timeout
             LibPcapLiveDevice.Open(DeviceModes.Promiscuous, 20);
-            //set the filter
             LibPcapLiveDevice.Filter = arpFilter;
-            // set a last request time that will trigger sending the
-            // arp request immediately
             var lastRequestTime = DateTime.FromBinary(0);
             var requestInterval = TimeSpan.FromMilliseconds(200);
 
@@ -322,12 +317,10 @@ namespace ArpGhostGateway
             {
                 if (requestInterval < (DateTime.Now - lastRequestTime))
                 {
-                    // inject the packet to the wire
                     LibPcapLiveDevice.SendPacket(request);
                     lastRequestTime = DateTime.Now;
                 }
 
-                //read the next packet from the network
                 if (LibPcapLiveDevice.GetNextPacket(out var packet) > 0)
                 {
                     if (packet.Device.LinkType != LinkLayers.Ethernet)
@@ -336,7 +329,7 @@ namespace ArpGhostGateway
                     }
                     var pack = Packet.ParsePacket(packet.Device.LinkType, packet.Data.ToArray());
                     arpPacket = pack.Extract<ArpPacket>();
-                    if (arpPacket == null) //is this an arp packet?
+                    if (arpPacket == null)//是否是一个arp包
                     {
                         continue;
                     }
@@ -408,18 +401,18 @@ namespace ArpGhostGateway
                                 continue;
                             }
                             var pack = Packet.ParsePacket(packet.Device.LinkType, packet.Data.ToArray());
-                            // is this an arp packet?
                             var arpPacket = pack.Extract<ArpPacket>();
                             if (arpPacket == null)
                             {
                                 continue;
                             }
 
-                            //if this is the reply we're looking for, stop
+                            //回复的arp包并且是我们请求的ip地址
                             if (arpPacket.SenderProtocolAddress.Equals(targetIPList[i]))
                             {
                                 Application.Current.Dispatcher.Invoke(() =>
                                 {
+                                    ///增加到IPlist中
                                     Computers.Add(new Computer()
                                     {
                                         IPAddress = arpPacket.SenderProtocolAddress.ToString(),
@@ -506,7 +499,6 @@ namespace ArpGhostGateway
         {
             var ethernetPacket = new EthernetPacket(localMac, PhysicalAddress.Parse("FF-FF-FF-FF-FF-FF"), EthernetType.Arp);
             var arpPacket = new ArpPacket(ArpOperation.Request, PhysicalAddress.Parse("00-00-00-00-00-00"), destinationIP, localMac, localIP);
-            // the arp packet is the payload of the ethernet packet
             ethernetPacket.PayloadPacket = arpPacket;
 
             return ethernetPacket;
@@ -522,11 +514,8 @@ namespace ArpGhostGateway
         /// <returns></returns>
         private Packet BuildResponse(IPAddress destIP, PhysicalAddress destMac, IPAddress senderIP, PhysicalAddress senderMac)
         {
-            // an arp packet is inside of an ethernet packet
             var ethernetPacket = new EthernetPacket(senderMac, destMac, EthernetType.Arp);
             var arpPacket = new ArpPacket(ArpOperation.Response, destMac, destIP, senderMac, senderIP);
-
-            // the arp packet is the payload of the ethernet packet
             ethernetPacket.PayloadPacket = arpPacket;
             return ethernetPacket;
         }

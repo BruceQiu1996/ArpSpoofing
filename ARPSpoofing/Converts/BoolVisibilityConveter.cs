@@ -3,7 +3,7 @@ using System.Globalization;
 using System.Windows;
 using System.Windows.Data;
 
-namespace ArpGhostGateway.Converts
+namespace ARPSpoofing.Converts
 {
     public class BoolVisibilityConveter : IValueConverter
     {

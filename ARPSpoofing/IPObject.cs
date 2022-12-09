@@ -1,6 +1,6 @@
 ﻿using System.Net;
 
-namespace ArpGhostGateway
+namespace ARPSpoofing
 {
     public class IPObject
     {

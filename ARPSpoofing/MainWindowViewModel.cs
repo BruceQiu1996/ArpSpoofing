@@ -4,7 +4,6 @@ using PacketDotNet;
 using SharpPcap;
 using SharpPcap.LibPcap;
 using System;
-using System.CodeDom;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
@@ -15,7 +14,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 
-namespace ArpGhostGateway
+namespace ARPSpoofing
 {
     public class MainWindowViewModel : ObservableObject
     {
@@ -470,7 +469,7 @@ namespace ArpGhostGateway
                     MacAddress = compute.MacAddress,
                 };
 
-                attackComputer.AttackTask = Task.Run(async () =>
+                attackComputer.ArpAttackTask = Task.Run(async () =>
                 {
                     while (true)
                     {
@@ -481,15 +480,26 @@ namespace ArpGhostGateway
                         try
                         {
                             LibPcapLiveDevice.SendPacket(packet);
+                            if (!attackComputer.Succeed) 
+                            {
+                                attackComputer.Succeed = true;
+                            }
                         }
                         catch (Exception ex)
                         {
-                            MessageBox.Show(ex.Message);
+                            attackComputer.Succeed = false;
+                            //MessageBox.Show(ex.Message);
                         }
 
                         await Task.Delay(1000);
                     }
                 }, attackComputer.CancellationTokenSource.Token);
+
+                attackComputer.DnsAttackTask = Task.Run(() =>
+                {
+                    //Todo dns attack
+                });
+
                 ArpAttackComputers.Add(attackComputer);
             }
         }
@@ -555,10 +565,12 @@ namespace ArpGhostGateway
     /// </summary>
     public class ArpAttackComputer : ObservableObject
     {
+        public bool Succeed { get; set; } //是否攻击成功
         public string IPAddress { get; set; }
         public string MacAddress { get; set; }
         public bool IsSelected { get; set; }
-        public Task AttackTask { get; set; }
+        public Task ArpAttackTask { get; set; }
+        public Task DnsAttackTask { get; set; } //todo define dns attack
         public CancellationTokenSource CancellationTokenSource { get; set; }
 
         private double _value;
@@ -575,13 +587,16 @@ namespace ArpGhostGateway
             {
                 while (true) 
                 {
-                    await Task.Delay(500);
-                    Application.Current.Dispatcher.Invoke(() =>
+                    if (Succeed)
                     {
-                        Value += 33;
-                        if (Value > 100)
-                            Value = 0;
-                    });
+                        await Task.Delay(500);
+                        Application.Current.Dispatcher.Invoke(() =>
+                        {
+                            Value += 33;
+                            if (Value > 100)
+                                Value = 0;
+                        });
+                    }
                 }
             });
         }
@@ -591,7 +606,7 @@ namespace ArpGhostGateway
         /// </summary>
         internal void SendArpSpoofing() 
         {
-            AttackTask?.Start();
+            ArpAttackTask?.Start();
         }
 
         internal void CancelTask() 

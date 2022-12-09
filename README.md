@@ -1,6 +1,6 @@
 #### 代码说明文档：
 https://www.cnblogs.com/qwqwQAQ/p/16955123.html
-
+![image](Images/main.png)
 #### 如何运行？
 ##### 1.安装winpcap
 https://www.winpcap.org/install/default.htm
@@ -14,3 +14,6 @@ vs2022+.net6编译
 1.切换最上面网卡下拉框直到能够自动加载ip和mac地址
 2.设置网段，然后扫描
 3.选择ip,攻击它。
+
+#### TODO
+dns劫持

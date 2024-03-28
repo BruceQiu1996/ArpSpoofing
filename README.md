@@ -1,6 +1,7 @@
 #### 代码说明文档：
 https://www.cnblogs.com/qwqwQAQ/p/16968378.html
-![image](Images/main.png)
+![image](Images/p1.png)
+![image](Images/p2.png)
 #### 如何运行？
 ##### 1.安装winpcap
 https://www.winpcap.org/install/default.htm

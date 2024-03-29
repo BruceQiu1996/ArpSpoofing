@@ -388,6 +388,7 @@ namespace ARPSpoofing
         /// <param name="endIP">终点ip</param>
         public async Task ScanLanAsync(IPObject startIP, IPObject endIP)
         {
+            LibPcapLiveDevice.StopCapture();
             var targetIPList = new List<IPAddress>();
             Computers = new ObservableCollection<Computer>();
             while (!startIP.Equals(endIP))

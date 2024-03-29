@@ -36,7 +36,7 @@
                               SelectedItem="{Binding LibPcapLiveDevice,UpdateSourceTrigger=PropertyChanged}"
                               Width="240" Height="20" Margin="5 0 0 0"
                               VerticalContentAlignment="Center"
-                              DisplayMemberPath="Name">
+                              DisplayMemberPath="Interface.FriendlyName">
                         <behaviors:Interaction.Triggers>
                             <behaviors:EventTrigger EventName="SelectionChanged">
                                 <behaviors:InvokeCommandAction Command="{Binding ShiftDeviceCommand}"></behaviors:InvokeCommandAction>
@@ -167,6 +167,7 @@
                     <ListBox.ContextMenu>
                         <ContextMenu>
                             <MenuItem Header="取消攻击" Command="{Binding StopCallTargetComputerCommand}"></MenuItem>
+                            <MenuItem Header="查看详情" Command="{Binding WatchDetailCommand}"></MenuItem>
                         </ContextMenu>
                     </ListBox.ContextMenu>
                     <ListBox.ItemsPanel>
@@ -215,7 +216,6 @@
                     </ListBox.ItemContainerStyle>
                 </ListBox>
             </TabItem>
-            <TabItem Header="DNS劫持列表"></TabItem>
         </TabControl>
     </Grid>
 </Window>
